@@ -1,0 +1,31 @@
+services:
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama    # persists downloaded models
+    restart: unless-stopped
+
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu
+    ports:
+      - "8880:8880"
+    restart: unless-stopped
+
+  server:
+    build: ./voice-io
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ollama
+      - kokoro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OLLAMA_HOST=http://ollama:11434   # flask talks to ollama by service name
+    volumes:
+      - ./voice-io:/app
+    restart: unless-stopped
+      
+volumes:
+  ollama_data:
