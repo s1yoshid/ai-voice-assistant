@@ -120,6 +120,8 @@ void setup()
     Serial.begin(115200);
     Serial.println("Atom Echo initialised");
 
+    Serial.println("Board ID: " + String(int(M5.getBoard())));
+
     FastLED.addLeds<SK6812, LED_PIN, GRB>(leds, NUM_LEDS);
 
     // Create the No-Split ring buffer before connecting
