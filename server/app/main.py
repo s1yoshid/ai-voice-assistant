@@ -1,8 +1,39 @@
 import io
 import asyncio
+import openai
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    llm_base_url: str
+    llm_model: str
+    model_config = SettingsConfigDict(env_file=".env")
+
+settings = Settings()
 
 app = FastAPI()
+
+client = openai.AsyncOpenAI(base_url=f"{settings.llm_base_url}/v1", api_key="no-key-required")
+
+# Test endpoint to confirm that server can connect to external local LLM hosted on a different laptop
+@app.get("/testllm")
+async def call_llm():
+    # use the newer Responses API from OpenAI instead of the old Chat Completions
+    try:
+        response = await client.responses.create(
+            model= {settings.llm_model},
+            input="Hello!"
+        )
+        print(response.output_text)
+        return {
+            "data": response.output_text,
+        }
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        raise HTTPException(
+            detail=str(e),
+            status_code=500,
+        )
 
 @app.get("/")
 def read_root():
