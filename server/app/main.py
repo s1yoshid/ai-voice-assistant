@@ -1,13 +1,17 @@
 import io
 import asyncio
+import wave
 import openai
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import logging
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 class Settings(BaseSettings):
     llm_base_url: str
     llm_model: str
-    model_config = SettingsConfigDict(env_file=".env")
+    stt_base_url: str
+    model_config = SettingsConfigDict(env_file=Path(__file__).parent / ".env")
 
 settings = Settings()
 
@@ -15,13 +19,15 @@ app = FastAPI()
 
 client = openai.AsyncOpenAI(base_url=f"{settings.llm_base_url}/v1", api_key="no-key-required")
 
+stt = openai.AsyncOpenAI(base_url=f"{settings.stt_base_url}/v1", api_key="no-key-required")
+
 # Test endpoint to confirm that server can connect to external local LLM hosted on a different laptop
 @app.get("/testllm")
 async def call_llm():
     # use the newer Responses API from OpenAI instead of the old Chat Completions
     try:
         response = await client.responses.create(
-            model= {settings.llm_model},
+            model= f"{settings.llm_model}",
             input="Hello!"
         )
         print(response.output_text)
@@ -29,7 +35,7 @@ async def call_llm():
             "data": response.output_text,
         }
     except Exception as e:
-        logging.error(f"Error: {str(e)}")
+        logging.exception("LLM call failed")
         raise HTTPException(
             detail=str(e),
             status_code=500,
@@ -82,8 +88,35 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"Total audio bytes received: {len(final_audio_payload)}")
                 print(f"Expected duration: {len(final_audio_payload) / 2 / 16000:.2f} seconds")
 
-                if len(final_audio_payload) > 0:                    
+                if len(final_audio_payload) > 0:
                     # --- INTEGRATE YOUR AI PIPELINE HERE ---
+                    bio = io.BytesIO()
+                    with wave.open(bio, "wb") as w:
+                        w.setnchannels(1)       # mono
+                        w.setsampwidth(2)       # 16-bit samples = 2 bytes
+                        w.setframerate(16000)   # must match your firmware's sample rate
+                        w.writeframes(final_audio_payload)
+                    try:
+                        r = await stt.audio.transcriptions.create(
+                            model="whisper-1",                               # required by the SDK, ignored by whisper.cpp
+                            file=("audio.wav", bio.getvalue(), "audio/wav"),
+                            response_format="text",                          # returns a plain str; "json" gives an object with .text
+                            temperature=0,
+                        )
+
+                        print(r.strip())
+                    except Exception as e:
+                        logging.exception("STT call failed")
+
+                    try:
+                        response = await client.responses.create(
+                            model= f"{settings.llm_model}",
+                            input=f"{r.strip()}"
+                        )
+                        print(response.output_text)
+                    except Exception as e:
+                        logging.exception("LLM call failed")
+                    
                     for i in range(0, len(final_audio_payload), TARGET_CHUNK_SIZE):
                         chunk = final_audio_payload[i:i + TARGET_CHUNK_SIZE]
 
