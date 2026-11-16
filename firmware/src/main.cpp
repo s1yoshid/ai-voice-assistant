@@ -33,6 +33,8 @@ WebsocketsClient client;
 int16_t ws_buffer[NUM_WS_BUFFERS][WS_BUFFER_SAMPLES];
 int     active_buf       = 0;
 size_t  recorded_samples = 0;
+static int pending_buf = -1;   // full buffer waiting for its last records to land
+static int since_full  = 0;
 
 // ─── Playback: FreeRTOS No-Split ring buffer ───────────────────────────────────
 // Holds 4 chunks of AUDIO_CHUNK_SIZE bytes each.
@@ -212,13 +214,19 @@ void loop()
         {
             recorded_samples += NUM_SAMPLES_RECORD;
 
+            // two records queued after it => pending buffer is fully filled
+            if (pending_buf >= 0 && ++since_full >= 2)
+            {
+                client.sendBinary((char *)ws_buffer[pending_buf],
+                                WS_BUFFER_SAMPLES * sizeof(int16_t));
+                pending_buf = -1;
+            }
+
             if (recorded_samples >= WS_BUFFER_SAMPLES)
             {
-                int send_buf = active_buf;
-                active_buf   = 1 - active_buf; // swap before sending
-
-                client.sendBinary((char *)ws_buffer[send_buf],
-                                  WS_BUFFER_SAMPLES * sizeof(int16_t));
+                pending_buf = active_buf;
+                since_full  = 0;
+                active_buf  = 1 - active_buf;
                 recorded_samples = 0;
             }
         }
@@ -230,15 +238,20 @@ void loop()
         leds[0] = CRGB::Red;
         FastLED.show();
 
-        // Flush any remaining partial buffer
+        while (M5.Mic.isRecording()) vTaskDelay(1);  // let queued records finish
+
+        if (pending_buf >= 0)
+        {
+            client.sendBinary((char *)ws_buffer[pending_buf],
+                            WS_BUFFER_SAMPLES * sizeof(int16_t));
+            pending_buf = -1;
+        }
         if (recorded_samples > 0)
         {
             client.sendBinary((char *)ws_buffer[active_buf],
-                              recorded_samples * sizeof(int16_t));
+                            recorded_samples * sizeof(int16_t));
             recorded_samples = 0;
         }
-
-        // Signal end-of-stream to server
         client.send("STOP_STREAM");
     }
 }

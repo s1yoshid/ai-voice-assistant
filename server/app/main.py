@@ -90,6 +90,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if len(final_audio_payload) > 0:
                     # --- INTEGRATE YOUR AI PIPELINE HERE ---
+                    # with wave.open("voice_audio.wav", "wb") as w:
+                    #     w.setnchannels(1)       # mono
+                    #     w.setsampwidth(2)       # 16-bit samples = 2 bytes
+                    #     w.setframerate(16000)   # must match your firmware's sample rate
+                    #     w.writeframes(final_audio_payload)
                     bio = io.BytesIO()
                     with wave.open(bio, "wb") as w:
                         w.setnchannels(1)       # mono
